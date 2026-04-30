@@ -1,0 +1,265 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "InfraDesk - Safe AWS Cost Optimization Role (v4 - Auto Connect)",
+  "Parameters": {
+    "ExternalId": {
+      "Type": "String",
+      "Description": "External ID for secure cross-account access",
+      "Default": "infradesk-secure"
+    },
+    "UserId": {
+      "Type": "String",
+      "Description": "InfraDesk user ID"
+    },
+    "AccountNickname": {
+      "Type": "String",
+      "Description": "Friendly name for this AWS account",
+      "Default": "My AWS Account"
+    },
+    "CallbackSecret": {
+      "Type": "String",
+      "Description": "Secret for callback verification",
+      "Default": "infradesk-cf-secret"
+    }
+  },
+  "Resources": {
+    "InfraDeskRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "InfraDeskRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": { "AWS": "arn:aws:iam::171654889858:root" },
+            "Action": "sts:AssumeRole",
+            "Condition": { "StringEquals": { "sts:ExternalId": { "Ref": "ExternalId" } } }
+          }]
+        },
+        "Description": "InfraDesk read + safe remediation role (v4 - auto connect)",
+        "MaxSessionDuration": 3600
+      }
+    },
+    "InfraDeskSafeRemediation": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyName": "InfraDeskSafeRemediation",
+        "Roles": [{ "Ref": "InfraDeskRole" }],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "ReadAccess",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Action": [
+                "ec2:Describe*",
+                                "eks:ListClusters",
+                                "eks:DescribeCluster",
+                                "eks:ListNodegroups",
+                                "eks:DescribeNodegroup",
+                                "cloudwatch:GetMetricStatistics", "rds:Describe*", "autoscaling:Describe*",
+                "elasticbeanstalk:Describe*", "cloudwatch:GetMetricStatistics",
+                "cloudwatch:ListMetrics", "cloudwatch:GetMetricData",
+                "ce:GetCostAndUsage", "ce:GetCostForecast", "ce:GetUsageForecast",
+                "ce:GetReservationUtilization", "ce:GetSavingsPlansPurchaseRecommendation",
+                "ce:GetDimensionValues", "ce:GetAnomalies", "ce:GetAnomalyMonitors",
+                "health:DescribeEvents", "health:DescribeEventDetails",
+                "health:DescribeAffectedEntities", "support:DescribeTrustedAdvisorChecks",
+                "support:DescribeTrustedAdvisorCheckResult", "sts:GetCallerIdentity",
+                "iam:GetAccountSummary", "iam:ListAccountAliases",
+                "s3:ListAllMyBuckets", "s3:GetBucketLocation",
+                "elasticloadbalancing:Describe*", "elasticache:Describe*",
+                "lambda:ListFunctions", "lambda:GetFunction"
+              ]
+            },
+            {
+              "Sid": "DenyProductionResources",
+              "Effect": "Deny",
+              "Resource": "*",
+              "Action": [
+                "ec2:StopInstances", "ec2:TerminateInstances",
+                "ec2:ModifyVolume", "ec2:DeleteVolume",
+                "rds:ModifyDBInstance", "rds:RebootDBInstance",
+                "autoscaling:UpdateAutoScalingGroup",
+                "autoscaling:PutScheduledUpdateGroupAction",
+                "elasticbeanstalk:UpdateEnvironment"
+              ],
+              "Condition": {
+                "StringEqualsIgnoreCase": {
+                  "aws:ResourceTag/Environment": ["production", "prod"]
+                }
+              }
+            },
+            {
+              "Sid": "EBSSafeOps",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Action": [
+                "ec2:CreateSnapshot", "ec2:CreateSnapshots",
+                "ec2:DeleteVolume", "ec2:ModifyVolume", "ec2:CreateTags"
+              ]
+            },
+            {
+              "Sid": "EC2Lifecycle",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Action": ["ec2:StartInstances", "ec2:StopInstances", "ec2:TerminateInstances"]
+            },
+            {
+              "Sid": "ElasticIPRelease",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Action": ["ec2:ReleaseAddress"]
+            },
+            {
+              "Sid": "ASGScheduling",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Action": [
+                "autoscaling:PutScheduledUpdateGroupAction",
+                "autoscaling:DeleteScheduledAction",
+                "autoscaling:UpdateAutoScalingGroup",
+                "autoscaling:CreateOrUpdateTags"
+              ]
+            },
+            {
+              "Sid": "ElasticBeanstalkScheduling",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Action": [
+                "elasticbeanstalk:UpdateEnvironment",
+                "elasticbeanstalk:DescribeConfigurationSettings"
+              ]
+            },
+            {
+              "Sid": "RDSOps",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Action": [
+                "rds:CreateDBSnapshot", "rds:AddTagsToResource",
+                "rds:ModifyDBInstance", "rds:RebootDBInstance",
+                "rds:StopDBInstance", "rds:StartDBInstance"
+              ]
+            },
+            {
+              "Sid": "LambdaDeployForScheduling",
+              "Effect": "Allow",
+              "Resource": "arn:aws:lambda:*:*:function:infradesk-*",
+              "Action": [
+                "lambda:CreateFunction", "lambda:UpdateFunctionCode",
+                "lambda:UpdateFunctionConfiguration", "lambda:DeleteFunction",
+                "lambda:AddPermission", "lambda:RemovePermission",
+                "lambda:InvokeFunction", "lambda:GetFunction",
+                "lambda:ListFunctions", "lambda:TagResource",
+                "lambda:UntagResource", "lambda:GetFunctionConfiguration"
+              ]
+            },
+            {
+              "Sid": "IAMRoleForScheduler",
+              "Effect": "Allow",
+              "Resource": ["arn:aws:iam::*:role/infradesk-*"],
+              "Action": [
+                "iam:CreateRole", "iam:GetRole", "iam:AttachRolePolicy",
+                "iam:DetachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy",
+                "iam:GetRolePolicy", "iam:PassRole",
+                "iam:ListAttachedRolePolicies", "iam:ListRolePolicies"
+              ]
+            },
+            {
+              "Sid": "EventBridgeScheduler",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Action": [
+                "scheduler:CreateSchedule", "scheduler:UpdateSchedule",
+                "scheduler:DeleteSchedule", "scheduler:GetSchedule",
+                "scheduler:ListSchedules", "scheduler:CreateScheduleGroup",
+                "scheduler:GetScheduleGroup", "scheduler:ListScheduleGroups"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "InfraDeskCallbackLambdaRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "InfraDeskCallbackLambdaRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": { "Service": "lambda.amazonaws.com" },
+            "Action": "sts:AssumeRole"
+          }]
+        },
+        "Policies": [{
+          "PolicyName": "InfraDeskCallbackPolicy",
+          "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": "*"
+            }]
+          }
+        }]
+      }
+    },
+    "InfraDeskCallbackLambda": {
+      "Type": "AWS::Lambda::Function",
+      "DependsOn": ["InfraDeskRole", "InfraDeskCallbackLambdaRole"],
+      "Properties": {
+        "FunctionName": { "Fn::Sub": "infradesk-callback-${UserId}" },
+        "Runtime": "python3.12",
+        "Handler": "index.handler",
+        "Role": { "Fn::GetAtt": ["InfraDeskCallbackLambdaRole", "Arn"] },
+        "Timeout": 30,
+        "Environment": {
+          "Variables": {
+            "INFRADESK_API_URL": "https://www.getinfradesk.com/api/cf-callback",
+            "USER_ID": { "Ref": "UserId" },
+            "EXTERNAL_ID": { "Ref": "ExternalId" },
+            "ROLE_ARN": { "Fn::GetAtt": ["InfraDeskRole", "Arn"] },
+            "STACK_NAME": { "Ref": "AWS::StackName" },
+            "REGION": { "Ref": "AWS::Region" },
+            "ACCOUNT_NICKNAME": { "Ref": "AccountNickname" },
+            "CALLBACK_SECRET": { "Ref": "CallbackSecret" }
+          }
+        },
+        "Code": {
+          "ZipFile": "import json\nimport os\nimport urllib.request\nimport cfnresponse\n\ndef handler(event, context):\n    print('Event:', json.dumps(event))\n    request_type = event.get('RequestType', '')\n    if request_type == 'Delete':\n        cfnresponse.send(event, context, cfnresponse.SUCCESS, {})\n        return\n    try:\n        payload = {\n            'userId': os.environ['USER_ID'],\n            'roleArn': os.environ['ROLE_ARN'],\n            'externalId': os.environ['EXTERNAL_ID'],\n            'region': os.environ['REGION'],\n            'stackName': os.environ['STACK_NAME'],\n            'accountName': os.environ['ACCOUNT_NICKNAME'],\n            'callbackSecret': os.environ['CALLBACK_SECRET'],\n        }\n        data = json.dumps(payload).encode('utf-8')\n        req = urllib.request.Request(\n            os.environ['INFRADESK_API_URL'],\n            data=data,\n            headers={'Content-Type': 'application/json', 'x-infradesk-signature': os.environ['CALLBACK_SECRET']},\n            method='POST'\n        )\n        with urllib.request.urlopen(req, timeout=25) as resp:\n            body = resp.read().decode('utf-8')\n            print('Callback response:', body)\n            cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Message': 'Connected'})\n    except Exception as e:\n        print('Callback error:', str(e))\n        cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Message': str(e)})\n"
+        }
+      }
+    },
+    "InfraDeskAutoConnect": {
+      "Type": "AWS::CloudFormation::CustomResource",
+      "DependsOn": ["InfraDeskCallbackLambda", "InfraDeskSafeRemediation"],
+      "Properties": {
+        "ServiceToken": { "Fn::GetAtt": ["InfraDeskCallbackLambda", "Arn"] },
+        "UserId": { "Ref": "UserId" },
+        "ExternalId": { "Ref": "ExternalId" },
+        "Region": { "Ref": "AWS::Region" },
+        "StackName": { "Ref": "AWS::StackName" }
+      }
+    }
+  },
+  "Outputs": {
+    "RoleArn": {
+      "Value": { "Fn::GetAtt": ["InfraDeskRole", "Arn"] },
+      "Description": "InfraDesk Role ARN"
+    },
+    "ExternalIdUsed": {
+      "Value": { "Ref": "ExternalId" },
+      "Description": "External ID configured"
+    },
+    "Region": {
+      "Value": { "Ref": "AWS::Region" },
+      "Description": "Region where stack was deployed"
+    }
+  }
+}
